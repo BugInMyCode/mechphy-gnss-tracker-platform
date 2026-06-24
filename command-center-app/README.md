@@ -13,7 +13,8 @@ The first prototype decodes MECHPHY telemetry protocol v1 packets, decodes the
 generic XBee API AP=2 golden vector, stores decoded node telemetry in SQLite,
 and displays node status in a PySide6 table.
 
-COM port live reading is intentionally a TODO/stub for now.
+COM port live reading is intentionally a TODO/stub for now. Simulation mode is
+provided for development before real XBee COM data is available.
 
 ## Windows Setup
 
@@ -24,6 +25,16 @@ python -m pip install -r requirements.txt
 python -m pip install -e .
 python -m mechphy_command_center.main
 ```
+
+Use the app controls:
+
+- **Load Golden Vector** decodes the telemetry golden JSON, stores it, and shows
+  one node row.
+- **Start Simulation** replays the XBee API AP=2 golden frame on a timer,
+  increments `sequence_number`, stores each decoded update, and refreshes the
+  table.
+- **Stop Simulation** stops the replay timer.
+- The interval field controls replay timing in seconds and defaults to `2`.
 
 Run tests with:
 

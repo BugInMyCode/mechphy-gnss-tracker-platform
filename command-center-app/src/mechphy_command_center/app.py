@@ -5,12 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QMainWindow,
+    QDoubleSpinBox,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -18,8 +20,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .simulator import XBeeGoldenReplaySimulator
 from .storage import TelemetryStore
-from .telemetry_protocol import decode_gnss_packet, load_golden_telemetry_packet
+from .telemetry_protocol import TelemetryRecord, decode_gnss_packet, load_golden_telemetry_packet
 
 
 TABLE_COLUMNS = [
@@ -46,25 +49,49 @@ def default_golden_vector_path() -> Path:
     return repository_root() / "test-data" / "telemetry_gnss_v1_golden.json"
 
 
+def default_xbee_vector_path() -> Path:
+    return repository_root() / "test-data" / "xbee_api_escaped_golden.json"
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
         store: TelemetryStore | None = None,
         golden_vector_path: Path | None = None,
+        xbee_vector_path: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("MECHPHY Command Centre")
-        self.resize(980, 520)
+        self.resize(1080, 640)
 
         self.store = store or TelemetryStore(default_database_path())
         self.golden_vector_path = golden_vector_path or default_golden_vector_path()
+        self.xbee_vector_path = xbee_vector_path or default_xbee_vector_path()
+        self.simulator: XBeeGoldenReplaySimulator | None = None
 
         self.load_golden_button = QPushButton("Load Golden Vector")
         self.load_golden_button.clicked.connect(self.load_golden_vector)
 
+        self.start_simulation_button = QPushButton("Start Simulation")
+        self.start_simulation_button.clicked.connect(self.start_simulation)
+
+        self.stop_simulation_button = QPushButton("Stop Simulation")
+        self.stop_simulation_button.clicked.connect(self.stop_simulation)
+        self.stop_simulation_button.setEnabled(False)
+
+        self.interval_seconds = QDoubleSpinBox()
+        self.interval_seconds.setRange(0.25, 3600.0)
+        self.interval_seconds.setSingleStep(0.5)
+        self.interval_seconds.setDecimals(2)
+        self.interval_seconds.setValue(2.0)
+        self.interval_seconds.setSuffix(" s")
+
         self.com_stub_button = QPushButton("COM Live TODO")
         self.com_stub_button.setEnabled(False)
+
+        self.simulation_timer = QTimer(self)
+        self.simulation_timer.timeout.connect(self.run_simulation_step)
 
         self.table = QTableWidget(0, len(TABLE_COLUMNS))
         self.table.setHorizontalHeaderLabels(TABLE_COLUMNS)
@@ -73,29 +100,84 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setAlternatingRowColors(True)
 
+        self.status_log = QPlainTextEdit()
+        self.status_log.setReadOnly(True)
+        self.status_log.setMaximumBlockCount(500)
+        self.status_log.setPlaceholderText("Status")
+
         toolbar = QHBoxLayout()
         toolbar.addWidget(self.load_golden_button)
+        toolbar.addWidget(self.start_simulation_button)
+        toolbar.addWidget(self.stop_simulation_button)
+        toolbar.addWidget(self.interval_seconds)
         toolbar.addWidget(self.com_stub_button)
         toolbar.addStretch(1)
 
         layout = QVBoxLayout()
         layout.addLayout(toolbar)
         layout.addWidget(self.table)
+        layout.addWidget(self.status_log)
 
         root = QWidget()
         root.setLayout(layout)
         self.setCentralWidget(root)
 
         self.refresh_table()
+        self.append_status("Ready. COM live reading is not implemented yet.")
 
     def load_golden_vector(self) -> None:
         try:
             packet = load_golden_telemetry_packet(self.golden_vector_path)
-            record = decode_gnss_packet(packet)
-            self.store.upsert_telemetry(record)
-            self.refresh_table()
+            self.handle_telemetry_packet(packet, source="Golden vector")
         except Exception as exc:  # pragma: no cover - UI error presentation only
             QMessageBox.critical(self, "Load failed", str(exc))
+
+    def start_simulation(self) -> None:
+        try:
+            self.simulator = XBeeGoldenReplaySimulator(self.xbee_vector_path)
+            interval_ms = int(self.interval_seconds.value() * 1000)
+            self.simulation_timer.start(interval_ms)
+            self.start_simulation_button.setEnabled(False)
+            self.stop_simulation_button.setEnabled(True)
+            self.interval_seconds.setEnabled(False)
+            self.append_status(f"Simulation started at {self.interval_seconds.value():.2f}s interval.")
+            self.run_simulation_step()
+        except Exception as exc:  # pragma: no cover - UI error presentation only
+            self.stop_simulation()
+            QMessageBox.critical(self, "Simulation failed", str(exc))
+
+    def stop_simulation(self) -> None:
+        self.simulation_timer.stop()
+        self.simulator = None
+        self.start_simulation_button.setEnabled(True)
+        self.stop_simulation_button.setEnabled(False)
+        self.interval_seconds.setEnabled(True)
+        self.append_status("Simulation stopped.")
+
+    def run_simulation_step(self) -> None:
+        if self.simulator is None:
+            return
+
+        try:
+            record = self.simulator.next_record()
+            self.handle_decoded_record(record, source="Simulation")
+        except Exception as exc:  # pragma: no cover - UI error presentation only
+            self.stop_simulation()
+            QMessageBox.critical(self, "Simulation failed", str(exc))
+
+    def handle_telemetry_packet(self, packet: bytes, source: str) -> None:
+        record = decode_gnss_packet(packet)
+        self.handle_decoded_record(record, source=source)
+
+    def handle_decoded_record(self, record: TelemetryRecord, source: str) -> None:
+        self.store.upsert_telemetry(record)
+        self.refresh_table()
+        self.append_status(
+            f"{source}: node {record.node_id} sequence {record.sequence_number} stored."
+        )
+
+    def append_status(self, message: str) -> None:
+        self.status_log.appendPlainText(message)
 
     def refresh_table(self) -> None:
         rows = self.store.list_nodes()
@@ -131,6 +213,7 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event: object) -> None:  # noqa: N802 - Qt method name
+        self.simulation_timer.stop()
         self.store.close()
         super().closeEvent(event)
 
