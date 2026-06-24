@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 import struct
@@ -65,7 +65,9 @@ class TelemetryRecord:
     def utc_time_iso8601(self) -> str:
         if self.utc_time == 0:
             return ""
-        return datetime.fromtimestamp(self.utc_time, tz=UTC).isoformat().replace("+00:00", "Z")
+        return datetime.fromtimestamp(self.utc_time, tz=timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
 
 
 def crc16_ccitt_false(data: bytes) -> int:

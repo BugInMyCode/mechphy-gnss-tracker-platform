@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
 
@@ -44,7 +44,9 @@ class TelemetryStore:
         self.connection.commit()
 
     def upsert_telemetry(self, record: TelemetryRecord, last_seen: str | None = None) -> None:
-        observed_at = last_seen or datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
+        observed_at = last_seen or datetime.now(tz=timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
         self.connection.execute(
             """
             INSERT INTO node_telemetry (

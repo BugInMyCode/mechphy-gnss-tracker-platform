@@ -124,9 +124,11 @@ class MainWindow(QMainWindow):
     def _format_utc(utc_time: int) -> str:
         if utc_time == 0:
             return ""
-        from datetime import UTC, datetime
+        from datetime import datetime, timezone
 
-        return datetime.fromtimestamp(utc_time, tz=UTC).isoformat().replace("+00:00", "Z")
+        return datetime.fromtimestamp(utc_time, tz=timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
 
     def closeEvent(self, event: object) -> None:  # noqa: N802 - Qt method name
         self.store.close()

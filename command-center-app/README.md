@@ -17,7 +17,7 @@ COM port live reading is intentionally a TODO/stub for now.
 
 ## Windows Setup
 
-Use Python 3.11 or newer.
+Use Python 3.10 or newer.
 
 ```powershell
 python -m pip install -r requirements.txt
