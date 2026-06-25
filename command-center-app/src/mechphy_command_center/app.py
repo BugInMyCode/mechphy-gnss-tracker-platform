@@ -6,20 +6,27 @@ from pathlib import Path
 import sys
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
+    QGraphicsScene,
+    QGraphicsView,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QDoubleSpinBox,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from .map_model import MapNode, map_node_from_row, project_nodes
 from .simulator import XBeeGoldenReplaySimulator
 from .storage import TelemetryStore
 from .telemetry_protocol import TelemetryRecord, decode_gnss_packet, load_golden_telemetry_packet
@@ -35,6 +42,82 @@ TABLE_COLUMNS = [
     "HDOP",
     "Last Seen",
 ]
+
+
+class MapPanel(QWidget):
+    """Offline placeholder map panel using a QGraphicsScene scatter plot."""
+
+    SCENE_WIDTH = 520
+    SCENE_HEIGHT = 360
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        self.title = QLabel("Location Panel")
+        self.summary = QLabel("No nodes loaded.")
+        self.summary.setWordWrap(True)
+
+        self.scene = QGraphicsScene(self)
+        self.scene.setSceneRect(0, 0, self.SCENE_WIDTH, self.SCENE_HEIGHT)
+
+        self.view = QGraphicsView(self.scene)
+        self.view.setMinimumHeight(280)
+        self.view.setFrameShape(QFrame.StyledPanel)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.title)
+        layout.addWidget(self.view)
+        layout.addWidget(self.summary)
+        self.setLayout(layout)
+
+        self.update_nodes([])
+
+    def update_nodes(self, nodes: list[MapNode]) -> None:
+        self.scene.clear()
+        self.scene.setSceneRect(0, 0, self.SCENE_WIDTH, self.SCENE_HEIGHT)
+        self._draw_background()
+
+        projection = project_nodes(nodes, self.SCENE_WIDTH, self.SCENE_HEIGHT)
+        marker_brush = QBrush(QColor("#1769aa"))
+        marker_pen = QPen(QColor("#0b3558"))
+
+        for projected in projection.nodes:
+            radius = 7.0
+            self.scene.addEllipse(
+                projected.x - radius,
+                projected.y - radius,
+                radius * 2.0,
+                radius * 2.0,
+                marker_pen,
+                marker_brush,
+            )
+            self.scene.addText(f"Node {projected.node.node_id}").setPos(
+                projected.x + 10.0, projected.y - 12.0
+            )
+
+        if nodes:
+            latest = nodes[-1]
+            self.summary.setText(
+                "Node ID: {node_id}\nLatitude: {lat:.7f}\nLongitude: {lon:.7f}\n"
+                "Last seen: {last_seen}".format(
+                    node_id=latest.node_id,
+                    lat=latest.latitude,
+                    lon=latest.longitude,
+                    last_seen=latest.last_seen,
+                )
+            )
+        else:
+            self.summary.setText("No nodes loaded.")
+
+    def _draw_background(self) -> None:
+        border_pen = QPen(QColor("#9aa6b2"))
+        grid_pen = QPen(QColor("#d8dee6"))
+        self.scene.addRect(0, 0, self.SCENE_WIDTH, self.SCENE_HEIGHT, border_pen)
+        for x in range(80, self.SCENE_WIDTH, 80):
+            self.scene.addLine(float(x), 0.0, float(x), float(self.SCENE_HEIGHT), grid_pen)
+        for y in range(60, self.SCENE_HEIGHT, 60):
+            self.scene.addLine(0.0, float(y), float(self.SCENE_WIDTH), float(y), grid_pen)
+        self.scene.addText("Offline placeholder map").setPos(10.0, 8.0)
 
 
 def repository_root() -> Path:
@@ -105,6 +188,8 @@ class MainWindow(QMainWindow):
         self.status_log.setMaximumBlockCount(500)
         self.status_log.setPlaceholderText("Status")
 
+        self.map_panel = MapPanel()
+
         toolbar = QHBoxLayout()
         toolbar.addWidget(self.load_golden_button)
         toolbar.addWidget(self.start_simulation_button)
@@ -115,7 +200,14 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout()
         layout.addLayout(toolbar)
-        layout.addWidget(self.table)
+
+        content_splitter = QSplitter(Qt.Horizontal)
+        content_splitter.addWidget(self.table)
+        content_splitter.addWidget(self.map_panel)
+        content_splitter.setStretchFactor(0, 3)
+        content_splitter.setStretchFactor(1, 2)
+
+        layout.addWidget(content_splitter)
         layout.addWidget(self.status_log)
 
         root = QWidget()
@@ -201,6 +293,11 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row_index, column_index, item)
 
         self.table.resizeColumnsToContents()
+        self.refresh_map(rows)
+
+    def refresh_map(self, rows: list[object]) -> None:
+        nodes = [map_node_from_row(row) for row in rows]
+        self.map_panel.update_nodes(nodes)
 
     @staticmethod
     def _format_utc(utc_time: int) -> str:

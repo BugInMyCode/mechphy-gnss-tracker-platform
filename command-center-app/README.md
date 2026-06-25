@@ -11,10 +11,15 @@ map views.
 
 The first prototype decodes MECHPHY telemetry protocol v1 packets, decodes the
 generic XBee API AP=2 golden vector, stores decoded node telemetry in SQLite,
-and displays node status in a PySide6 table.
+and displays node status in a PySide6 table plus an offline map/location panel.
 
 COM port live reading is intentionally a TODO/stub for now. Simulation mode is
 provided for development before real XBee COM data is available.
+
+The map/location panel is a placeholder built with PySide6 widgets only. It
+plots decoded nodes as local scene markers with node ID, latitude, longitude,
+and last-seen details. Real GIS layers can be added later without changing the
+telemetry ingest path.
 
 ## Windows Setup
 
@@ -29,10 +34,10 @@ python -m mechphy_command_center.main
 Use the app controls:
 
 - **Load Golden Vector** decodes the telemetry golden JSON, stores it, and shows
-  one node row.
+  one node row plus one marker in the map/location panel.
 - **Start Simulation** replays the XBee API AP=2 golden frame on a timer,
   increments `sequence_number`, stores each decoded update, and refreshes the
-  table.
+  table and map/location panel.
 - **Stop Simulation** stops the replay timer.
 - The interval field controls replay timing in seconds and defaults to `2`.
 
